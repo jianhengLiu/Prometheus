@@ -58,7 +58,7 @@ Eigen::Vector3d pos_drone_slam;
 Eigen::Quaterniond q_slam;
 Eigen::Vector3d Euler_slam;
 //---------------------------------------发布相关变量--------------------------------------------
-ros::Publisher vision_pub;
+ros::Publisher vision_pub, camera_pose_pub;
 ros::Publisher drone_state_pub;
 ros::Publisher message_pub;
 prometheus_msgs::Message message;
@@ -66,47 +66,48 @@ ros::Publisher odom_pub;
 ros::Publisher trajectory_pub;
 prometheus_msgs::DroneState Drone_State;
 nav_msgs::Odometry Drone_odom;
-std::vector<geometry_msgs::PoseStamped> posehistory_vector_;
+std::vector <geometry_msgs::PoseStamped> posehistory_vector_;
+
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>函数声明<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 void send_to_fcu();
+
 void pub_to_nodes(prometheus_msgs::DroneState State_from_fcu);
+
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>回调函数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-void laser_cb(const tf2_msgs::TFMessage::ConstPtr &msg)
-{
+void laser_cb(const tf2_msgs::TFMessage::ConstPtr &msg) {
     //确定是cartographer发出来的/tf信息
     //有的时候/tf这个消息的发布者不止一个
     //可改成ＴＦ监听
-    if (msg->transforms[0].header.frame_id == "map" && msg->transforms[0].child_frame_id == "base_link" && input_source == 1)  
-    {
+    if (msg->transforms[0].header.frame_id == "map" && msg->transforms[0].child_frame_id == "base_link" &&
+        input_source == 1) {
         laser = msg->transforms[0];
 
         //位置 xy  [将解算的位置从map坐标系转换至world坐标系]
         pos_drone_laser[0] = laser.transform.translation.x + pos_offset[0];
         pos_drone_laser[1] = laser.transform.translation.y + pos_offset[1];
-        pos_drone_laser[2] = laser.transform.translation.z + pos_offset[2]; 
+        pos_drone_laser[2] = laser.transform.translation.z + pos_offset[2];
 
-         // Read the Quaternion from the Carto Package [Frame: Laser[ENU]]
-         Eigen::Quaterniond q_laser_enu(laser.transform.rotation.w, laser.transform.rotation.x, laser.transform.rotation.y, laser.transform.rotation.z);
+        // Read the Quaternion from the Carto Package [Frame: Laser[ENU]]
+        Eigen::Quaterniond q_laser_enu(laser.transform.rotation.w, laser.transform.rotation.x,
+                                       laser.transform.rotation.y, laser.transform.rotation.z);
 
-         q_laser = q_laser_enu;
+        q_laser = q_laser_enu;
 
-         // Transform the Quaternion to Euler Angles
-         Euler_laser = quaternion_to_euler(q_laser);
+        // Transform the Quaternion to Euler Angles
+        Euler_laser = quaternion_to_euler(q_laser);
 
         // pub_message(message_pub, prometheus_msgs::Message::NORMAL, NODE_NAME, "test.");
 
-            //cout << "Position [X Y Z] : " << pos_drone_laser[0] << " [ m ] "<< pos_drone_laser[1]<<" [ m ] "<< pos_drone_laser[2]<<" [ m ] "<<endl;
-            //cout << "Euler [X Y Z] : " << Euler_laser[0] << " [m/s] "<< Euler_laser[1]<<" [m/s] "<< Euler_laser[2]<<" [m/s] "<<endl;
+        //cout << "Position [X Y Z] : " << pos_drone_laser[0] << " [ m ] "<< pos_drone_laser[1]<<" [ m ] "<< pos_drone_laser[2]<<" [ m ] "<<endl;
+        //cout << "Euler [X Y Z] : " << Euler_laser[0] << " [m/s] "<< Euler_laser[1]<<" [m/s] "<< Euler_laser[2]<<" [m/s] "<<endl;
     }
 }
 
-void mocap_cb(const geometry_msgs::PoseStamped::ConstPtr &msg)
-{
+void mocap_cb(const geometry_msgs::PoseStamped::ConstPtr &msg) {
     //位置 -- optitrack系 到 ENU系
     //Frame convention 0: Z-up -- 1: Y-up (See the configuration in the motive software)
     int optitrack_frame = 0;
-    if (optitrack_frame == 0)
-    {
+    if (optitrack_frame == 0) {
         // Read the Drone Position from the Vrpn Package [Frame: Vicon]  (Vicon to ENU frame)
         pos_drone_mocap = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
 
@@ -114,14 +115,14 @@ void mocap_cb(const geometry_msgs::PoseStamped::ConstPtr &msg)
         pos_drone_mocap[1] = pos_drone_mocap[1] - pos_offset[1];
         pos_drone_mocap[2] = pos_drone_mocap[2] - pos_offset[2];
         // Read the Quaternion from the Vrpn Package [Frame: Vicon[ENU]]
-        q_mocap = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z);
-    }
-    else
-    {
+        q_mocap = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y,
+                                     msg->pose.orientation.z);
+    } else {
         // Read the Drone Position from the Vrpn Package [Frame: Vicon]  (Vicon to ENU frame)
         pos_drone_mocap = Eigen::Vector3d(-msg->pose.position.x, msg->pose.position.z, msg->pose.position.y);
         // Read the Quaternion from the Vrpn Package [Frame: Vicon[ENU]]
-        q_mocap = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.z, msg->pose.orientation.y); //Y-up convention, switch the q2 & q3
+        q_mocap = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.z,
+                                     msg->pose.orientation.y); //Y-up convention, switch the q2 & q3
         pos_drone_mocap[0] = pos_drone_mocap[0] - pos_offset[0];
         pos_drone_mocap[1] = pos_drone_mocap[1] - pos_offset[1];
         pos_drone_mocap[2] = pos_drone_mocap[2] - pos_offset[2];
@@ -129,74 +130,66 @@ void mocap_cb(const geometry_msgs::PoseStamped::ConstPtr &msg)
 
     // Transform the Quaternion to Euler Angles
     Euler_mocap = quaternion_to_euler(q_mocap);
-    
+
     last_timestamp = msg->header.stamp;
 }
 
-void gazebo_cb(const nav_msgs::Odometry::ConstPtr &msg)
-{
-    if (msg->header.frame_id == "world")
-    {
-        pos_drone_gazebo = Eigen::Vector3d(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+void gazebo_cb(const nav_msgs::Odometry::ConstPtr &msg) {
+    if (msg->header.frame_id == "world") {
+        pos_drone_gazebo = Eigen::Vector3d(msg->pose.pose.position.x, msg->pose.pose.position.y,
+                                           msg->pose.pose.position.z);
 
-        q_gazebo = Eigen::Quaterniond(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+        q_gazebo = Eigen::Quaterniond(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
+                                      msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
         Euler_gazebo = quaternion_to_euler(q_gazebo);
         // Euler_gazebo[2] = Euler_gazebo[2] + yaw_offset;
         // q_gazebo = quaternion_from_rpy(Euler_gazebo);
-    }
-    else
-    {
+    } else {
         pub_message(message_pub, prometheus_msgs::Message::NORMAL, NODE_NAME, "wrong gazebo ground truth frame id.");
     }
 }
 
-void slam_cb(const geometry_msgs::PoseStamped::ConstPtr &msg)
-{
-    if (msg->header.frame_id == "map_slam")
-    {
+void slam_cb(const geometry_msgs::PoseStamped::ConstPtr &msg) {
+    if (msg->header.frame_id == "map_slam") {
         pos_drone_slam = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
         // pos_drone_gazebo[0] = msg->pose.pose.position.x + pos_offset[0];
         // pos_drone_gazebo[1] = msg->pose.pose.position.y + pos_offset[1];
         // pos_drone_gazebo[2] = msg->pose.pose.position.z + pos_offset[2];
 
-        q_slam = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z);
+        q_slam = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y,
+                                    msg->pose.orientation.z);
         Euler_slam = quaternion_to_euler(q_slam);
         // Euler_gazebo[2] = Euler_gazebo[2] + yaw_offset;
         // q_gazebo = quaternion_from_rpy(Euler_gazebo);
-    }
-    else
-    {
+    } else {
         pub_message(message_pub, prometheus_msgs::Message::NORMAL, NODE_NAME, "wrong slam frame id.");
     }
 }
 
-void t265_cb(const nav_msgs::Odometry::ConstPtr &msg)
-{
-    if (msg->header.frame_id == "t265_odom_frame")
-    {
-        pos_drone_t265 = Eigen::Vector3d(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+void t265_cb(const nav_msgs::Odometry::ConstPtr &msg) {
+    if (msg->header.frame_id == "t265_odom_frame") {
+        pos_drone_t265 = Eigen::Vector3d(msg->pose.pose.position.x, msg->pose.pose.position.y,
+                                         msg->pose.pose.position.z);
         // pos_drone_t265[0] = msg->pose.pose.position.x + pos_offset[0];
         // pos_drone_t265[1] = msg->pose.pose.position.y + pos_offset[1];
         // pos_drone_t265[2] = msg->pose.pose.position.z + pos_offset[2];
 
-        q_t265 = Eigen::Quaterniond(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+        q_t265 = Eigen::Quaterniond(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
+                                    msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
         Euler_t265 = quaternion_to_euler(q_gazebo);
         // Euler_t265[2] = Euler_t265[2] + yaw_offset;
         // q_t265 = quaternion_from_rpy(Euler_t265);
-    }
-    else
-    {
+    } else {
         pub_message(message_pub, prometheus_msgs::Message::NORMAL, NODE_NAME, "wrong t265 frame id.");
     }
 }
 
-void timerCallback(const ros::TimerEvent &e)
-{
+void timerCallback(const ros::TimerEvent &e) {
     pub_message(message_pub, prometheus_msgs::Message::NORMAL, NODE_NAME, "Program is running.");
 }
+
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>主 函 数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     ros::init(argc, argv, "px4_pos_estimator");
     ros::NodeHandle nh("~");
 
@@ -220,10 +213,12 @@ int main(int argc, char **argv)
     ros::Subscriber t265_sub = nh.subscribe<nav_msgs::Odometry>("/t265/odom/sample", 100, t265_cb);
 
     // 【订阅】optitrack估计位置
-    ros::Subscriber optitrack_sub = nh.subscribe<geometry_msgs::PoseStamped>("/vrpn_client_node/"+ object_name + "/pose", 100, mocap_cb);
+    ros::Subscriber optitrack_sub = nh.subscribe<geometry_msgs::PoseStamped>(
+            "/vrpn_client_node/" + object_name + "/pose", 100, mocap_cb);
 
     // 【订阅】gazebo仿真真值
-    ros::Subscriber gazebo_sub = nh.subscribe<nav_msgs::Odometry>("/prometheus/ground_truth/p300_basic", 100, gazebo_cb);
+    ros::Subscriber gazebo_sub = nh.subscribe<nav_msgs::Odometry>("/prometheus/ground_truth/p300_basic", 100,
+                                                                  gazebo_cb);
 
     // 【订阅】SLAM估计位姿
     ros::Subscriber slam_sub = nh.subscribe<geometry_msgs::PoseStamped>("/slam/pose", 100, slam_cb);
@@ -231,6 +226,8 @@ int main(int argc, char **argv)
     // 【发布】无人机位置和偏航角 坐标系 ENU系
     //  本话题要发送飞控(通过mavros_extras/src/plugins/vision_pose_estimate.cpp发送), 对应Mavlink消息为VISION_POSITION_ESTIMATE(#102), 对应的飞控中的uORB消息为vehicle_vision_position.msg 及 vehicle_vision_attitude.msg
     vision_pub = nh.advertise<geometry_msgs::PoseStamped>("/mavros/vision_pose/pose", 10);
+    camera_pose_pub = nh.advertise<geometry_msgs::PoseStamped>("/camera/pose", 10);
+
 
     // 【发布】无人机状态量
     drone_state_pub = nh.advertise<prometheus_msgs::DroneState>("/prometheus/drone_state", 10);
@@ -240,7 +237,7 @@ int main(int argc, char **argv)
 
     // 【发布】无人机移动轨迹，用于RVIZ显示
     trajectory_pub = nh.advertise<nav_msgs::Path>("/prometheus/drone_trajectory", 10);
-    
+
     // 【发布】提示消息
     message_pub = nh.advertise<prometheus_msgs::Message>("/prometheus/message/main", 10);
 
@@ -254,8 +251,7 @@ int main(int argc, char **argv)
     ros::Rate rate(rate_hz);
 
     //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Main Loop<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    while (ros::ok())
-    {
+    while (ros::ok()) {
         //回调一次 更新传感器状态
         ros::spinOnce();
 
@@ -271,13 +267,11 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void send_to_fcu()
-{
+void send_to_fcu() {
     geometry_msgs::PoseStamped vision;
 
     //vicon
-    if (input_source == 0)
-    {
+    if (input_source == 0) {
         vision.pose.position.x = pos_drone_mocap[0];
         vision.pose.position.y = pos_drone_mocap[1];
         vision.pose.position.z = pos_drone_mocap[2];
@@ -286,16 +280,14 @@ void send_to_fcu()
         vision.pose.orientation.y = q_mocap.y();
         vision.pose.orientation.z = q_mocap.z();
         vision.pose.orientation.w = q_mocap.w();
-      
+
         // 此处时间主要用于监测动捕，T265设备是否正常工作
-        if( prometheus_control_utils::get_time_in_sec(last_timestamp) > TIMEOUT_MAX)
-        {
+        if (prometheus_control_utils::get_time_in_sec(last_timestamp) > TIMEOUT_MAX) {
             pub_message(message_pub, prometheus_msgs::Message::ERROR, NODE_NAME, "Mocap Timeout.");
         }
-        
-        } //laser
-    else if (input_source == 1)
-    {
+
+    } //laser
+    else if (input_source == 1) {
         vision.pose.position.x = pos_drone_laser[0];
         vision.pose.position.y = pos_drone_laser[1];
         vision.pose.position.z = pos_drone_laser[2];
@@ -306,9 +298,7 @@ void send_to_fcu()
         vision.pose.orientation.y = q_laser.y();
         vision.pose.orientation.z = q_laser.z();
         vision.pose.orientation.w = q_laser.w();
-    }
-    else if (input_source == 2)
-    {
+    } else if (input_source == 2) {
         vision.pose.position.x = pos_drone_gazebo[0];
         vision.pose.position.y = pos_drone_gazebo[1];
         vision.pose.position.z = pos_drone_gazebo[2];
@@ -317,9 +307,26 @@ void send_to_fcu()
         vision.pose.orientation.y = q_gazebo.y();
         vision.pose.orientation.z = q_gazebo.z();
         vision.pose.orientation.w = q_gazebo.w();
-    }
-    else if (input_source == 3)
-    {
+
+
+        Eigen::Matrix3d Ric;
+        Ric << 0, 0, 1,
+                -1, 0, 0,
+                0, -1, 0;
+
+        Eigen::Quaterniond q_camera = Eigen::Quaterniond(q_gazebo.toRotationMatrix() * Ric);
+
+        geometry_msgs::PoseStamped camera = vision;
+        camera.pose.position.x += 0.2;
+        camera.pose.position.z += -0.1;
+        camera.pose.orientation.x = q_camera.x();
+        camera.pose.orientation.y = q_camera.y();
+        camera.pose.orientation.z = q_camera.z();
+        camera.pose.orientation.w = q_camera.w();
+        camera.header.stamp = ros::Time::now();
+        camera_pose_pub.publish(camera);
+
+    } else if (input_source == 3) {
         vision.pose.position.x = pos_drone_t265[0];
         vision.pose.position.y = pos_drone_t265[1];
         vision.pose.position.z = pos_drone_t265[2];
@@ -328,9 +335,7 @@ void send_to_fcu()
         vision.pose.orientation.y = q_t265.y();
         vision.pose.orientation.z = q_t265.z();
         vision.pose.orientation.w = q_t265.w();
-    }
-    else if (input_source == 4)
-    {
+    } else if (input_source == 4) {
         vision.pose.position.x = pos_drone_slam[0];
         vision.pose.position.y = pos_drone_slam[1];
         vision.pose.position.z = pos_drone_slam[2];
@@ -345,15 +350,13 @@ void send_to_fcu()
     vision_pub.publish(vision);
 }
 
-void pub_to_nodes(prometheus_msgs::DroneState State_from_fcu)
-{
+void pub_to_nodes(prometheus_msgs::DroneState State_from_fcu) {
     // 发布无人机状态，具体内容参见 prometheus_msgs::DroneState
     Drone_State = State_from_fcu;
     Drone_State.header.stamp = ros::Time::now();
     // 户外情况，使用相对高度
-    if(input_source == 9 )
-    {
-        Drone_State.position[2]  = Drone_State.rel_alt;
+    if (input_source == 9) {
+        Drone_State.position[2] = Drone_State.rel_alt;
     }
     drone_state_pub.publish(Drone_State);
 
@@ -368,8 +371,7 @@ void pub_to_nodes(prometheus_msgs::DroneState State_from_fcu)
     Drone_odom.pose.pose.position.z = Drone_State.position[2];
 
     // 导航算法规定 高度不能小于0
-    if (Drone_odom.pose.pose.position.z <= 0)
-    {
+    if (Drone_odom.pose.pose.position.z <= 0) {
         Drone_odom.pose.pose.position.z = 0.01;
     }
 
@@ -391,8 +393,7 @@ void pub_to_nodes(prometheus_msgs::DroneState State_from_fcu)
 
     //发布无人机的位姿 和 轨迹 用作rviz中显示
     posehistory_vector_.insert(posehistory_vector_.begin(), drone_pos);
-    if (posehistory_vector_.size() > TRA_WINDOW)
-    {
+    if (posehistory_vector_.size() > TRA_WINDOW) {
         posehistory_vector_.pop_back();
     }
 
